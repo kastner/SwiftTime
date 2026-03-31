@@ -31,3 +31,33 @@ swiftc -parse-as-library -framework SwiftUI -framework AppKit -o SwiftTime Swift
 ```
 
 The app lives in the macOS menu bar and updates continuously while open.
+
+## Launch At Startup
+
+Because this project is a bare executable rather than a bundled `.app`, the simplest startup option is a per-user `launchd` agent managed by the included script.
+
+1. Build the binary:
+
+```bash
+swiftc -parse-as-library -framework SwiftUI -framework AppKit -o SwiftTime SwiftTime.swift
+```
+
+2. Add it to startup:
+
+```bash
+./startup.sh add
+```
+
+3. If you rebuild the binary later, reload the login item:
+
+```bash
+./startup.sh update
+```
+
+4. To remove it from startup:
+
+```bash
+./startup.sh remove
+```
+
+The script writes `~/Library/LaunchAgents/com.kastner.swifttime.plist` pointing at the `SwiftTime` binary in this checkout. If you move the checkout, run `./startup.sh update`.
