@@ -1,0 +1,380 @@
+import AppKit
+import Foundation
+import SwiftUI
+
+@main
+struct SwiftTimeApp: App {
+    @StateObject private var model = ClockModel()
+
+    var body: some Scene {
+        MenuBarExtra {
+            MenuContent(model: model)
+        } label: {
+            Image(systemName: "clock")
+                .accessibilityLabel("SwiftTime")
+        }
+        .menuBarExtraStyle(.window)
+    }
+}
+
+struct MenuContent: View {
+    @ObservedObject var model: ClockModel
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            let now = context.date
+            let referenceDate = model.referenceDate(now: now)
+            let localLocation = model.localLocation
+
+            VStack(alignment: .leading, spacing: 16) {
+                headerSection(referenceDate: referenceDate, now: now, localLocation: localLocation)
+
+                Divider()
+
+                controlsSection(now: now)
+
+                Divider()
+
+                locationsSection(referenceDate: referenceDate, now: now)
+
+                Divider()
+
+                HStack(spacing: 10) {
+                    Button {
+                        model.resetToNow()
+                    } label: {
+                        Label("Now", systemImage: "clock.arrow.circlepath")
+                    }
+                    .keyboardShortcut("0")
+
+                    Button {
+                        NSApplication.shared.terminate(nil)
+                    } label: {
+                        Label("Quit", systemImage: "xmark.circle")
+                    }
+                    .keyboardShortcut("q")
+                }
+                .buttonStyle(.bordered)
+            }
+            .frame(width: 430)
+            .padding(16)
+        }
+    }
+
+    @ViewBuilder
+    private func headerSection(referenceDate: Date, now: Date, localLocation: ClockLocation) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Local Time")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            Text(model.timeString12(for: referenceDate, in: localLocation.timeZone))
+                .font(.system(size: 31, weight: .semibold, design: .rounded))
+                .foregroundStyle(.primary)
+
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(model.timeString24(for: referenceDate, in: localLocation.timeZone))
+                    .font(.system(size: 16, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.primary)
+
+                Text(localLocation.detailText)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
+            Text(model.referenceSummary(now: now))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private func controlsSection(now: Date) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Hours From Now")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                Spacer()
+
+                Text(model.offsetLabel(now: now))
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 10) {
+                Button {
+                    model.shiftReference(byHours: -1, now: now)
+                } label: {
+                    Label("-1h", systemImage: "minus")
+                }
+
+                Slider(
+                    value: Binding(
+                        get: { model.sliderOffset(now: now) },
+                        set: { model.setSliderOffset($0) }
+                    ),
+                    in: -18...18,
+                    step: 1
+                )
+
+                Button {
+                    model.shiftReference(byHours: 1, now: now)
+                } label: {
+                    Label("+1h", systemImage: "plus")
+                }
+            }
+            .buttonStyle(.bordered)
+        }
+    }
+
+    @ViewBuilder
+    private func locationsSection(referenceDate: Date, now: Date) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("World Clocks")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            ForEach(model.locations) { location in
+                ClockRow(
+                    location: location,
+                    referenceDate: referenceDate,
+                    now: now,
+                    model: model
+                )
+            }
+        }
+    }
+}
+
+private struct ClockRow: View {
+    let location: ClockLocation
+    let referenceDate: Date
+    let now: Date
+    @ObservedObject var model: ClockModel
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 8) {
+                    Text(location.name)
+                        .font(.body.weight(.medium))
+                        .foregroundStyle(.primary)
+
+                    Text(location.shortZoneLabel(for: referenceDate))
+                        .font(.caption.weight(.medium))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.secondary.opacity(0.12), in: Capsule())
+                        .foregroundStyle(.secondary)
+
+                    Text(model.relativeDayLabel(for: referenceDate, in: location.timeZone))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Text(model.timeString12(for: referenceDate, in: location.timeZone))
+                    .font(.system(.title3, design: .rounded, weight: .semibold))
+                    .foregroundStyle(.primary)
+
+                Text(model.timeString24(for: referenceDate, in: location.timeZone))
+                    .font(.system(.callout, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 8)
+
+            Menu {
+                ForEach(0..<24, id: \.self) { hour in
+                    Button(model.hourMenuLabel(hour: hour)) {
+                        model.pinToHour(hour, in: location, now: now)
+                    }
+                }
+            } label: {
+                Label("Set Hour", systemImage: "slider.horizontal.3")
+                    .labelStyle(.titleAndIcon)
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+        }
+        .padding(.vertical, 2)
+    }
+}
+
+@MainActor
+final class ClockModel: ObservableObject {
+    @Published private(set) var locations: [ClockLocation]
+    @Published private var pinnedDate: Date?
+    @Published private var relativeHourOffset: Double = 0
+
+    let localLocation: ClockLocation
+
+    init() {
+        let localTimeZone = TimeZone.autoupdatingCurrent
+        localLocation = ClockLocation(
+            id: localTimeZone.identifier,
+            name: "Here",
+            timeZone: localTimeZone,
+            referenceIdentifier: localTimeZone.identifier
+        )
+
+        locations = [
+            ClockLocation(id: "UTC", name: "UTC", timeZone: .gmt, referenceIdentifier: "UTC"),
+            ClockLocation(id: "America/Los_Angeles", name: "San Francisco", timeZone: TimeZone(identifier: "America/Los_Angeles")!, referenceIdentifier: "America/Los_Angeles"),
+            ClockLocation(id: "Asia/Kolkata", name: "Mumbai", timeZone: TimeZone(identifier: "Asia/Kolkata")!, referenceIdentifier: "Asia/Kolkata"),
+            ClockLocation(id: "Europe/Berlin", name: "Germany", timeZone: TimeZone(identifier: "Europe/Berlin")!, referenceIdentifier: "Europe/Berlin")
+        ]
+    }
+
+    func referenceDate(now: Date) -> Date {
+        if let pinnedDate {
+            return pinnedDate
+        }
+
+        return Calendar.autoupdatingCurrent.date(byAdding: .hour, value: Int(relativeHourOffset), to: now) ?? now
+    }
+
+    func resetToNow() {
+        pinnedDate = nil
+        relativeHourOffset = 0
+    }
+
+    func setSliderOffset(_ value: Double) {
+        pinnedDate = nil
+        relativeHourOffset = value.rounded()
+    }
+
+    func sliderOffset(now: Date) -> Double {
+        let currentReference = referenceDate(now: now)
+        let hours = currentReference.timeIntervalSince(now) / 3600
+        return hours.rounded()
+    }
+
+    func shiftReference(byHours hours: Int, now: Date) {
+        if let pinnedDate {
+            self.pinnedDate = Calendar.autoupdatingCurrent.date(byAdding: .hour, value: hours, to: pinnedDate) ?? pinnedDate
+        } else {
+            relativeHourOffset = (relativeHourOffset + Double(hours)).clamped(to: -18...18)
+        }
+    }
+
+    func pinToHour(_ hour: Int, in location: ClockLocation, now: Date) {
+        let currentReference = referenceDate(now: now)
+        var components = calendarComponents(for: currentReference, in: location.timeZone)
+        components.hour = hour
+        components.minute = 0
+        components.second = 0
+
+        let calendar = Calendar.autoupdatingCurrent
+        if let pinned = calendar.date(from: components) {
+            pinnedDate = pinned
+        }
+    }
+
+    func referenceSummary(now: Date) -> String {
+        if let pinnedDate {
+            let zoneLabel = localLocation.shortZoneLabel(for: pinnedDate)
+            return "Pinned to \(timeString12(for: pinnedDate, in: localLocation.timeZone)) \(zoneLabel)"
+        }
+
+        if relativeHourOffset == 0 {
+            return "Live local time"
+        }
+
+        let direction = relativeHourOffset > 0 ? "+" : ""
+        return "Previewing \(direction)\(Int(relativeHourOffset))h from now"
+    }
+
+    func offsetLabel(now: Date) -> String {
+        let offset = Int(sliderOffset(now: now))
+        if offset == 0 {
+            return "now"
+        }
+
+        return offset > 0 ? "+\(offset)h" : "\(offset)h"
+    }
+
+    func timeString12(for date: Date, in timeZone: TimeZone) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale.autoupdatingCurrent
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "h:mm a"
+        return formatter.string(from: date)
+    }
+
+    func timeString24(for date: Date, in timeZone: TimeZone) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "HH:mm"
+        return formatter.string(from: date)
+    }
+
+    func relativeDayLabel(for date: Date, in timeZone: TimeZone) -> String {
+        let localDay = semanticDay(for: date, in: localLocation.timeZone)
+        let targetDay = semanticDay(for: date, in: timeZone)
+        let utcCalendar = zonedCalendar(timeZone: .gmt)
+        let days = utcCalendar.dateComponents([.day], from: localDay, to: targetDay).day ?? 0
+
+        switch days {
+        case ..<(-1):
+            return targetDay.formatted(.dateTime.weekday(.abbreviated))
+        case -1:
+            return "Yesterday"
+        case 0:
+            return "Today"
+        case 1:
+            return "Tomorrow"
+        default:
+            return targetDay.formatted(.dateTime.weekday(.abbreviated))
+        }
+    }
+
+    func hourMenuLabel(hour: Int) -> String {
+        let normalizedHour = ((hour % 24) + 24) % 24
+        let period = normalizedHour < 12 ? "AM" : "PM"
+        let twelveHour = normalizedHour % 12 == 0 ? 12 : normalizedHour % 12
+        return "\(twelveHour) \(period)"
+    }
+
+    private func calendarComponents(for date: Date, in timeZone: TimeZone) -> DateComponents {
+        var calendar = Calendar.autoupdatingCurrent
+        calendar.timeZone = timeZone
+        return calendar.dateComponents([.year, .month, .day, .hour, .minute, .second], from: date)
+    }
+
+    private func zonedCalendar(timeZone: TimeZone) -> Calendar {
+        var calendar = Calendar.autoupdatingCurrent
+        calendar.timeZone = timeZone
+        return calendar
+    }
+
+    private func semanticDay(for date: Date, in timeZone: TimeZone) -> Date {
+        let sourceCalendar = zonedCalendar(timeZone: timeZone)
+        let components = sourceCalendar.dateComponents([.year, .month, .day], from: date)
+        let utcCalendar = zonedCalendar(timeZone: .gmt)
+        return utcCalendar.date(from: components) ?? date
+    }
+}
+
+struct ClockLocation: Identifiable {
+    let id: String
+    let name: String
+    let timeZone: TimeZone
+    let referenceIdentifier: String
+
+    var detailText: String {
+        referenceIdentifier.replacingOccurrences(of: "_", with: " ")
+    }
+
+    func shortZoneLabel(for date: Date) -> String {
+        timeZone.abbreviation(for: date) ?? referenceIdentifier
+    }
+}
+
+private extension Double {
+    func clamped(to range: ClosedRange<Double>) -> Double {
+        min(max(self, range.lowerBound), range.upperBound)
+    }
+}
