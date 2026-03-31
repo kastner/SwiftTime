@@ -2,6 +2,9 @@
 
 SwiftUI menu bar app for comparing local time with a small set of world clocks and previewing other hours for planning.
 
+> [!CAUTION]
+> This app was "vibe coded" with Codex/GPT-5.4. Do not use it as is, do not trust this code!
+
 ## Notes
 
 - This version is intentionally minimal: one Swift source file plus this README.

@@ -77,6 +77,10 @@ struct MenuContent: View {
                     .font(.system(size: 16, weight: .medium, design: .monospaced))
                     .foregroundStyle(.primary)
 
+                Text(localLocation.zoneSummary(for: referenceDate))
+                    .font(.callout.weight(.medium))
+                    .foregroundStyle(.secondary)
+
                 Text(localLocation.detailText)
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -163,6 +167,13 @@ private struct ClockRow: View {
                         .foregroundStyle(.primary)
 
                     Text(location.shortZoneLabel(for: referenceDate))
+                        .font(.caption.weight(.medium))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.secondary.opacity(0.12), in: Capsule())
+                        .foregroundStyle(.secondary)
+
+                    Text(location.utcOffsetLabel(for: referenceDate))
                         .font(.caption.weight(.medium))
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
@@ -261,12 +272,12 @@ final class ClockModel: ObservableObject {
 
     func pinToHour(_ hour: Int, in location: ClockLocation, now: Date) {
         let currentReference = referenceDate(now: now)
-        var components = calendarComponents(for: currentReference, in: location.timeZone)
+        let calendar = zonedCalendar(timeZone: location.timeZone)
+        var components = calendar.dateComponents([.year, .month, .day, .hour, .minute, .second], from: currentReference)
         components.hour = hour
         components.minute = 0
         components.second = 0
 
-        let calendar = Calendar.autoupdatingCurrent
         if let pinned = calendar.date(from: components) {
             pinnedDate = pinned
         }
@@ -338,12 +349,6 @@ final class ClockModel: ObservableObject {
         return "\(twelveHour) \(period)"
     }
 
-    private func calendarComponents(for date: Date, in timeZone: TimeZone) -> DateComponents {
-        var calendar = Calendar.autoupdatingCurrent
-        calendar.timeZone = timeZone
-        return calendar.dateComponents([.year, .month, .day, .hour, .minute, .second], from: date)
-    }
-
     private func zonedCalendar(timeZone: TimeZone) -> Calendar {
         var calendar = Calendar.autoupdatingCurrent
         calendar.timeZone = timeZone
@@ -369,7 +374,33 @@ struct ClockLocation: Identifiable {
     }
 
     func shortZoneLabel(for date: Date) -> String {
-        timeZone.abbreviation(for: date) ?? referenceIdentifier
+        switch referenceIdentifier {
+        case "UTC":
+            return "UTC"
+        case "Asia/Kolkata":
+            return "IST"
+        default:
+            return timeZone.abbreviation(for: date) ?? referenceIdentifier
+        }
+    }
+
+    func utcOffsetLabel(for date: Date) -> String {
+        let seconds = timeZone.secondsFromGMT(for: date)
+        let totalMinutes = seconds / 60
+        let sign = totalMinutes >= 0 ? "+" : "-"
+        let absoluteMinutes = abs(totalMinutes)
+        let hours = absoluteMinutes / 60
+        let minutes = absoluteMinutes % 60
+
+        if minutes == 0 {
+            return "UTC\(sign)\(hours)"
+        }
+
+        return String(format: "UTC%@%d:%02d", sign, hours, minutes)
+    }
+
+    func zoneSummary(for date: Date) -> String {
+        "\(shortZoneLabel(for: date)) \(utcOffsetLabel(for: date))"
     }
 }
 
