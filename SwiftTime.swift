@@ -234,6 +234,7 @@ final class ClockModel: ObservableObject {
             ClockLocation(id: "UTC", name: "UTC", timeZone: .gmt, referenceIdentifier: "UTC"),
             ClockLocation(id: "America/Los_Angeles", name: "San Francisco", timeZone: TimeZone(identifier: "America/Los_Angeles")!, referenceIdentifier: "America/Los_Angeles"),
             ClockLocation(id: "Asia/Kolkata", name: "Mumbai", timeZone: TimeZone(identifier: "Asia/Kolkata")!, referenceIdentifier: "Asia/Kolkata"),
+            ClockLocation(id: "Asia/Shanghai", name: "China Standard Time", timeZone: TimeZone(identifier: "Asia/Shanghai")!, referenceIdentifier: "Asia/Shanghai"),
             ClockLocation(id: "Europe/Berlin", name: "Germany", timeZone: TimeZone(identifier: "Europe/Berlin")!, referenceIdentifier: "Europe/Berlin")
         ]
     }
