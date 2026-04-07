@@ -31,10 +31,6 @@ struct MenuContent: View {
 
                 Divider()
 
-                controlsSection(now: now)
-
-                Divider()
-
                 locationsSection(referenceDate: referenceDate, now: now)
 
                 Divider()
@@ -64,9 +60,15 @@ struct MenuContent: View {
     @ViewBuilder
     private func headerSection(referenceDate: Date, now: Date, localLocation: ClockLocation) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Local Time")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+            HStack(alignment: .firstTextBaseline) {
+                Text("Local Time")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                Spacer()
+
+                HourPickerButton(location: localLocation, now: now, model: model)
+            }
 
             Text(model.timeString12(for: referenceDate, in: localLocation.timeZone))
                 .font(.system(size: 31, weight: .semibold, design: .rounded))
@@ -93,47 +95,6 @@ struct MenuContent: View {
     }
 
     @ViewBuilder
-    private func controlsSection(now: Date) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("Hours From Now")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-
-                Spacer()
-
-                Text(model.offsetLabel(now: now))
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.secondary)
-            }
-
-            HStack(spacing: 10) {
-                Button {
-                    model.shiftReference(byHours: -1, now: now)
-                } label: {
-                    Label("-1h", systemImage: "minus")
-                }
-
-                Slider(
-                    value: Binding(
-                        get: { model.sliderOffset(now: now) },
-                        set: { model.setSliderOffset($0) }
-                    ),
-                    in: -18...18,
-                    step: 1
-                )
-
-                Button {
-                    model.shiftReference(byHours: 1, now: now)
-                } label: {
-                    Label("+1h", systemImage: "plus")
-                }
-            }
-            .buttonStyle(.bordered)
-        }
-    }
-
-    @ViewBuilder
     private func locationsSection(referenceDate: Date, now: Date) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("World Clocks")
@@ -149,6 +110,27 @@ struct MenuContent: View {
                 )
             }
         }
+    }
+}
+
+private struct HourPickerButton: View {
+    let location: ClockLocation
+    let now: Date
+    @ObservedObject var model: ClockModel
+
+    var body: some View {
+        Menu {
+            ForEach(0..<24, id: \.self) { hour in
+                Button(model.hourMenuLabel(hour: hour)) {
+                    model.pinToHour(hour, in: location, now: now)
+                }
+            }
+        } label: {
+            Label("Set Hour", systemImage: "slider.horizontal.3")
+                .labelStyle(.titleAndIcon)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
     }
 }
 
@@ -196,18 +178,7 @@ private struct ClockRow: View {
 
             Spacer(minLength: 8)
 
-            Menu {
-                ForEach(0..<24, id: \.self) { hour in
-                    Button(model.hourMenuLabel(hour: hour)) {
-                        model.pinToHour(hour, in: location, now: now)
-                    }
-                }
-            } label: {
-                Label("Set Hour", systemImage: "slider.horizontal.3")
-                    .labelStyle(.titleAndIcon)
-            }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
+            HourPickerButton(location: location, now: now, model: model)
         }
         .padding(.vertical, 2)
     }
@@ -217,7 +188,6 @@ private struct ClockRow: View {
 final class ClockModel: ObservableObject {
     @Published private(set) var locations: [ClockLocation]
     @Published private var pinnedDate: Date?
-    @Published private var relativeHourOffset: Double = 0
 
     let localLocation: ClockLocation
 
@@ -244,31 +214,11 @@ final class ClockModel: ObservableObject {
             return pinnedDate
         }
 
-        return Calendar.autoupdatingCurrent.date(byAdding: .hour, value: Int(relativeHourOffset), to: now) ?? now
+        return now
     }
 
     func resetToNow() {
         pinnedDate = nil
-        relativeHourOffset = 0
-    }
-
-    func setSliderOffset(_ value: Double) {
-        pinnedDate = nil
-        relativeHourOffset = value.rounded()
-    }
-
-    func sliderOffset(now: Date) -> Double {
-        let currentReference = referenceDate(now: now)
-        let hours = currentReference.timeIntervalSince(now) / 3600
-        return hours.rounded()
-    }
-
-    func shiftReference(byHours hours: Int, now: Date) {
-        if let pinnedDate {
-            self.pinnedDate = Calendar.autoupdatingCurrent.date(byAdding: .hour, value: hours, to: pinnedDate) ?? pinnedDate
-        } else {
-            relativeHourOffset = (relativeHourOffset + Double(hours)).clamped(to: -18...18)
-        }
     }
 
     func pinToHour(_ hour: Int, in location: ClockLocation, now: Date) {
@@ -290,21 +240,7 @@ final class ClockModel: ObservableObject {
             return "Pinned to \(timeString12(for: pinnedDate, in: localLocation.timeZone)) \(zoneLabel)"
         }
 
-        if relativeHourOffset == 0 {
-            return "Live local time"
-        }
-
-        let direction = relativeHourOffset > 0 ? "+" : ""
-        return "Previewing \(direction)\(Int(relativeHourOffset))h from now"
-    }
-
-    func offsetLabel(now: Date) -> String {
-        let offset = Int(sliderOffset(now: now))
-        if offset == 0 {
-            return "now"
-        }
-
-        return offset > 0 ? "+\(offset)h" : "\(offset)h"
+        return "Live local time"
     }
 
     func timeString12(for date: Date, in timeZone: TimeZone) -> String {
@@ -402,11 +338,5 @@ struct ClockLocation: Identifiable {
 
     func zoneSummary(for date: Date) -> String {
         "\(shortZoneLabel(for: date)) \(utcOffsetLabel(for: date))"
-    }
-}
-
-private extension Double {
-    func clamped(to range: ClosedRange<Double>) -> Double {
-        min(max(self, range.lowerBound), range.upperBound)
     }
 }
